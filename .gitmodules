@@ -1,0 +1,15 @@
+[submodule "3rdparty/wndx/sane"]
+	path = 3rdparty/wndx/sane
+	url = git@github.com:WANDEX/wndx_sane.git
+[submodule "3rdparty/dronecan/libcanard"]
+	path = 3rdparty/dronecan/libcanard
+	url = https://github.com/dronecan/libcanard
+[submodule "3rdparty/dronecan/dsdl"]
+	path = 3rdparty/dronecan/dsdl
+	url = https://github.com/dronecan/dsdl
+[submodule "3rdparty/dronecan/pydronecan"]
+	path = 3rdparty/dronecan/pydronecan
+	url = https://github.com/dronecan/pydronecan
+[submodule "3rdparty/dronecan/dronecan_dsdlc"]
+	path = 3rdparty/dronecan/dronecan_dsdlc
+	url = https://github.com/dronecan/dronecan_dsdlc
