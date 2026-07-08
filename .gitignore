@@ -1,0 +1,19 @@
+# CMake specific
+[Bb]uild/
+
+# VS Code specific
+.vscode
+.vs
+
+# Mac OS specific
+.DS_Store
+
+.cache/
+.ccls-cache/
+.idea
+.kdev4/
+
+*.txt
+.venv/
+dsdlc_generated/
+sch/sch/
