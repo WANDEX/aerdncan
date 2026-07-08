@@ -11,3 +11,9 @@ indent_size = 2
 charset = utf-8
 trim_trailing_whitespace = true
 
+[*.c]
+end_of_line = crlf
+
+[*.h]
+end_of_line = crlf
+
