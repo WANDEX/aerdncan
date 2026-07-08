@@ -13,7 +13,9 @@
 .idea
 .kdev4/
 
-*.txt
 .venv/
+compile_commands.json*
 dsdlc_generated/
 sch/sch/
+sch/txt/
+stm/.mxproject

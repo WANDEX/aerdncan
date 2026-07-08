@@ -31,8 +31,8 @@ at_path() { hash "$1" >/dev/null 2>&1 ;} # if $1 is found at $PATH -> return 0
 ## "OPTION DEFAULTS" - project specific, they may be changed between the projects freely.
 ## In other cases, version should be bumped, then updated script must be propagated
 ## to older versions of the script and changes must be merged except "OPTION DEFAULTS".
-VERSION="1.3.3"
-VERSION_DATE="2026-06-05" # update at each VERSION bump
+VERSION="1.3.3.p1"
+VERSION_DATE="2026-07-08" # update at each VERSION bump
 
 bname="wndx_cmake_build.sh"; at_path basename && bname=$(basename "$0")
 USAGE="\
@@ -295,6 +295,9 @@ get_opt() {
   TESTS_FILTER='.*'
   TESTS_REPEAT="${TESTS_REPEAT:-3}"
   ##
+  case "$CC" in
+  *"gcc"*) CC=arm-none-eabi-gcc ;;
+  esac
   _compiler="${CC:-_}"
   cmbn=$(basename "$_compiler") # get compiler basename in case declared via full path
   gen_dir_name=$(echo "$GENERATOR" | sed "s/[ |-]/_/g" | tr "[:upper:]" "[:lower:]")
@@ -313,10 +316,7 @@ get_opt() {
   ##
   COPTS=\
 "-D CMAKE_C_COMPILER='$CC'
- -D CMAKE_CXX_COMPILER='$CXX'
  -D CMAKE_BUILD_TYPE=$BUILD_TYPE
- -D $PRJ_BUILD_TESTS=ON
- -D $PRJ_MEMCHECK_EN=ON
  $COPTS
 " ## <- default cmake configure options
   BOPTS=\
@@ -419,7 +419,7 @@ vsep() { printf "\n%b%.78s%b\n\n" "${2}" "[${1}]${SEP}" "${END}" ;}
 
 ## MAIN
 get_opt "$@"
-use_linker_mold
+# use_linker_mold
 pre_configure
 
 vsep "CONFIGURE" "${BLU}"
