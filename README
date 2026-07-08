@@ -24,13 +24,14 @@ ENV prep - cross-compiling with CMake in terminal
 =================================================
 $ export PATH0="$PATH" # backup unmodified PATH
 $ export PATH="/opt/stm32cubeide/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.14.3.rel1.linux64_1.0.100.202602081740/tools/bin:/opt/stm32cubeide/plugins/com.st.stm32cube.ide.mcu.externaltools.make.linux64_2.2.100.202601091506/tools/bin:/opt/stm32cubeide/plugins/com.st.stm32cube.ide.mcu.externaltools.cmake.linux64_1.1.101.202603101401/tools/bin:/opt/stm32cubeide/plugins/com.st.stm32cube.ide.mcu.externaltools.ninja.linux64_1.1.100.202601091506/tools/bin:$PATH"
-$ export CC=arm-none-eabi-gcc
+$ export CMAKE_C_COMPILER=arm-none-eabi-gcc
+$ export CMAKE_TOOLCHAIN_FILE=stm/cmake/gcc-arm-none-eabi.cmake
 
 BUILD FROM SOURCE
 =================
 $ git clone --recurse-submodules git@github.com:WANDEX/aerdncan.git && cd aerdncan
 $ cmake -E make_directory build
-$ cmake -S . -B build -DCMAKE_C_COMPILER=arm-none-eabi-gcc -DCMAKE_TOOLCHAIN_FILE=stm/cmake/gcc-arm-none-eabi.cmake
+$ cmake -S . -B build
 $ cmake --build build
 
 TEST RUN DRONECAN

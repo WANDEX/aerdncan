@@ -317,6 +317,7 @@ get_opt() {
   COPTS=\
 "-D CMAKE_C_COMPILER='$CC'
  -D CMAKE_BUILD_TYPE=$BUILD_TYPE
+ -D CMAKE_TOOLCHAIN_FILE=stm/cmake/gcc-arm-none-eabi.cmake
  $COPTS
 " ## <- default cmake configure options
   BOPTS=\
