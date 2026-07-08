@@ -9,7 +9,7 @@ project(
   aerdncan
   VERSION       0.0.1
   LANGUAGES     C ASM
-  DESCRIPTION   "aerdncan - stm32 project with droneCAN & ina169."
+  DESCRIPTION   "aerdncan - stm32 with droneCAN & ina169"
   HOMEPAGE_URL  "https://github.com/WANDEX/aerdncan"
 )
 
