@@ -25,7 +25,16 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "stm32f4xx_hal_rcc.h"
 
+#include <stdint.h>
+#include <stdio.h>              // fprintf
+#include <stdbool.h>
+#include <string.h>
+
+#include <canard_stm32.h>
+
+#include "uavcan.equipment.power.BatteryInfo.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -35,6 +44,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+
+#ifndef BATTERY_MODEL_NAME
+#define BATTERY_MODEL_NAME "Dummy Battery Name" // max length is 31 chars!
+#endif//BATTERY_MODEL_NAME
 
 /* USER CODE END PD */
 
@@ -57,6 +70,107 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/**
+ * @brief Initializes the CAN controller at the specified bit rate.
+ *
+ * @retval      0               Success
+ * @retval      negative        Error
+ */
+int16_t canard_init(void)
+{
+  static char const* const fn  = "canard_init()";
+  static char const* const fni = "canardSTM32Init()";
+  int16_t stat = -1; // error
+  // FIXME: these values may need tweaking
+  CanardSTM32CANTimings timings = {
+    .bit_rate_prescaler = 1024,            /// [1, 1024]
+    .bit_segment_1 = 16,                   /// [1, 16]
+    .bit_segment_2 = 8,                    /// [1, 8]
+    .max_resynchronization_jump_width = 1  /// [1, 4] (recommended value is 1)
+  };
+#if 1 // try to compute automatically
+  // FIXME: is this proper source/function for the peripheral_clock_rate?
+  const uint32_t peripheral_clock_rate = HAL_RCC_GetPCLK1Freq();
+  /// TODO: get this value via function or constant
+  /// CAN1.CalculateBaudRate=875000 bit/s
+  /// FIXME: calculate target_bitrate
+  /// https://calculator.academy/bps-to-hz-calculator/
+  /// https://calculator.academy/bits-per-second-to-hertz-calculator/
+  const uint32_t target_bitrate = 0;
+  stat = canardSTM32ComputeCANTimings(peripheral_clock_rate, target_bitrate, &timings);
+#endif
+  /// automatic TX abort on error should be used - dynamic node ID allocation.
+  stat = canardSTM32Init(&timings, CanardSTM32IfaceModeAutomaticTxAbortOnError);
+  if (stat < 0) { // error
+    /// The clock of the CAN module must be enabled
+    /// If CAN2 is used, CAN1 must be also enabled!
+    fprintf(stderr, "%s ERROR: %s -> %d\n", fn, fni, stat);
+    return stat;
+  }
+  return 0;
+}
+
+/**
+ * @brief Pushes one frame into the TX buffer, if there is space.
+ *
+ * @retval battery data length.
+ */
+static uint32_t fill_battery_info(uint8_t* buffer)
+{
+  // TODO fill with: temperature, voltage, current - from the ina169 pin data.
+  struct uavcan_equipment_power_BatteryInfo pkt = {
+    .temperature               = 0.f, // float
+    .voltage                   = 0.f, // float
+    .current                   = 0.f, // float
+    .average_power_10sec       = 0.f, // float
+    .remaining_capacity_wh     = 0.f, // float
+    .full_charge_capacity_wh   = 0.f, // float
+    .hours_to_full_charge      = 0.f, // float
+    .status_flags              = 0,   // uint16_t
+    .state_of_health_pct       = 0,   // uint8_t
+    .state_of_charge_pct       = 0,   // uint8_t
+    .state_of_charge_pct_stdev = 0,   // uint8_t
+    .battery_id                = 0,   // uint8_t
+    .model_instance_id         = 0,   // uint32_t
+  };
+  pkt.model_name.len = strlen(BATTERY_MODEL_NAME);
+  strncpy((char*)pkt.model_name.data, BATTERY_MODEL_NAME, sizeof(pkt.model_name.data));
+  uint32_t len = uavcan_equipment_power_BatteryInfo_encode(&pkt, buffer, true);
+  return len;
+}
+
+/**
+ * @brief Pushes one frame into the TX buffer, if there is space.
+ *
+ * @retval      0               Success
+ * @retval      negative        Error
+ */
+int16_t canard_send_battery_info(void)
+{
+  static char const* const fn  = "canard_send_battery_info()";
+  static char const* const fnt = "canardSTM32Transmit()";
+  int16_t stat = -1; // error
+  /// fill battery_data - CANARD_ENABLE_CANFD required to fit in single frame!
+  uint8_t  battery_data[UAVCAN_EQUIPMENT_POWER_BATTERYINFO_MAX_SIZE];
+  uint32_t battery_data_len = fill_battery_info(battery_data);
+  CanardCANFrame* const frame = { };
+  frame->id = 0;
+  frame->data_len = battery_data_len;
+  frame->iface_id = 0;
+  memcpy(frame->data, battery_data, battery_data_len);
+  /// CAN send battery info, making sure that it fits in into a single frame!
+  stat = canardSTM32Transmit(frame);
+  if (stat < 0) { // error
+    fprintf(stderr, "%s ERROR: %s -> %d\n", fn, fnt, stat);
+    return stat;
+  }
+  if (stat != 1) { // error
+    fprintf(stderr, "%s ERROR: %s No space in the buffer!\n", fn, fnt);
+    return stat * -1;
+  }
+  return 0;
+}
 
 /* USER CODE END 0 */
 
@@ -94,16 +208,25 @@ int main(void)
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
 
+  int16_t stat = -1; // error
+  stat = canard_init();
+  if (!stat) goto init_fail;
+  fprintf(stderr, "[ OK ] init done\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
+  while (1) {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    canard_send_battery_info();
+    HAL_Delay(1000); // wait 1000ms = 1sec
   }
+init_fail:
+  fprintf(stderr, "[FAIL] init fail -> %d\n", stat);
+  // TODO: cleanup
+  return stat;
   /* USER CODE END 3 */
 }
 
