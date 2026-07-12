@@ -131,7 +131,7 @@ int16_t canard_init(void)
  *
  * @retval battery data length.
  */
-static uint32_t fill_battery_info(uint8_t* buffer)
+static uint32_t canard_fill_battery_info(uint8_t* buffer)
 {
   // TODO fill with: temperature, voltage, current - from the ina169 pin data.
   struct uavcan_equipment_power_BatteryInfo pkt = {
@@ -168,7 +168,7 @@ int16_t canard_send_battery_info(void)
   int16_t stat = -1; // error
   /// fill battery_data - CANARD_ENABLE_CANFD required to fit in single frame!
   uint8_t  battery_data[UAVCAN_EQUIPMENT_POWER_BATTERYINFO_MAX_SIZE];
-  uint32_t battery_data_len = fill_battery_info(battery_data);
+  uint32_t battery_data_len = canard_fill_battery_info(battery_data);
   CanardCANFrame* const frame = { };
   frame->id = 0;
   frame->data_len = battery_data_len;
