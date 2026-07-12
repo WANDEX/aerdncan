@@ -72,6 +72,21 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN 0 */
 
 /**
+ * @brief Missing implementation of usleep for the bare-metal target.
+ *
+ * Fixes linking error / missing implementation of usleep().
+ * canard_stm32.c:139:(.text.waitMSRINAKBitStateChange+0x34):
+ * undefined reference to usleep.
+ */
+int usleep(int usec) {
+    if (usec == 0) return 0;
+    int ms = usec / 1000; // convert microseconds to milliseconds
+    if (ms == 0) ms = 1;  // minimum delay of 1ms
+    HAL_Delay(ms);
+    return 0;
+}
+
+/**
  * @brief Initializes the CAN controller at the specified bit rate.
  *
  * @retval      0               Success
@@ -223,6 +238,7 @@ int main(void)
     canard_send_battery_info();
     HAL_Delay(1000); // wait 1000ms = 1sec
   }
+  return 0;
 init_fail:
   fprintf(stderr, "[FAIL] init fail -> %d\n", stat);
   // TODO: cleanup
