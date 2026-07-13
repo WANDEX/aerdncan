@@ -250,7 +250,7 @@ int main(void)
   return 0;
 init_fail:
   fprintf(stderr, "[FAIL] init fail -> %d\n", stat);
-  // TODO: cleanup
+  /// additional cleanup if needed.
   return stat;
   /* USER CODE END 3 */
 }
