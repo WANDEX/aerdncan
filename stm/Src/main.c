@@ -25,11 +25,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "stm32f4xx_hal_rcc.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>              // fprintf
-#include <stdbool.h>
 #include <string.h>
 
 #include <canard_stm32.h>
@@ -45,9 +44,20 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#ifndef BATTERY_MODEL_NAME
-#define BATTERY_MODEL_NAME "Dummy Battery Name" // max length is 31 chars!
-#endif//BATTERY_MODEL_NAME
+/**
+ * @note max length is 31 chars!
+ */
+#ifndef AERDNCAN_BATTERY_MODEL_NAME
+#define AERDNCAN_BATTERY_MODEL_NAME "Dummy Battery Name"
+#endif//AERDNCAN_BATTERY_MODEL_NAME
+
+/**
+ * @see CAN1.CalculateBaudRate=875000 bit/s == (bps || bpc || Hz)
+ * CAN is a serial bus, 1 bit per cycle processed by design => 1 bit/s == 1 Hz.
+ */
+#ifndef AERDNCAN_CAN1_TARGET_BITRATE
+#define AERDNCAN_CAN1_TARGET_BITRATE 875000
+#endif//AERDNCAN_CAN1_TARGET_BITRATE
 
 /* USER CODE END PD */
 
@@ -96,24 +106,23 @@ int16_t canard_init(void)
 {
   static char const* const fn  = "canard_init()";
   static char const* const fni = "canardSTM32Init()";
+  static char const* const fnt = "canardSTM32ComputeCANTimings()";
   int16_t stat = -1; // error
-  // FIXME: these values may need tweaking
+  /// @see RM0090 - 32.7.7 Bit timing
   CanardSTM32CANTimings timings = {
-    .bit_rate_prescaler = 1024,            /// [1, 1024]
-    .bit_segment_1 = 16,                   /// [1, 16]
-    .bit_segment_2 = 8,                    /// [1, 8]
-    .max_resynchronization_jump_width = 1  /// [1, 4] (recommended value is 1)
+    .bit_rate_prescaler = hcan1.Init.Prescaler, // [1, 1024]
+    .bit_segment_1      = hcan1.Init.TimeSeg1,  // [1, 16]
+    .bit_segment_2      = hcan1.Init.TimeSeg2,  // [1, 8]
+    .max_resynchronization_jump_width = 1       // [1, 4] (1 is recommended)
   };
-#if 1 // try to compute automatically
-  // FIXME: is this proper source/function for the peripheral_clock_rate?
-  const uint32_t peripheral_clock_rate = HAL_RCC_GetPCLK1Freq();
-  /// TODO: get this value via function or constant
-  /// CAN1.CalculateBaudRate=875000 bit/s
-  /// FIXME: calculate target_bitrate
-  /// https://calculator.academy/bps-to-hz-calculator/
-  /// https://calculator.academy/bits-per-second-to-hertz-calculator/
-  const uint32_t target_bitrate = 0;
-  stat = canardSTM32ComputeCANTimings(peripheral_clock_rate, target_bitrate, &timings);
+#if 1 // try to compute timings automatically
+  uint32_t const peripheral_clock_rate = HAL_RCC_GetPCLK1Freq();
+  stat = canardSTM32ComputeCANTimings(peripheral_clock_rate,
+         AERDNCAN_CAN1_TARGET_BITRATE, &timings);
+  if (stat < 0) { // error
+    fprintf(stderr, "%s ERROR: %s -> %d\n", fn, fnt, stat);
+    return stat;
+  }
 #endif
   /// automatic TX abort on error should be used - dynamic node ID allocation.
   stat = canardSTM32Init(&timings, CanardSTM32IfaceModeAutomaticTxAbortOnError);
@@ -149,10 +158,10 @@ static uint32_t canard_fill_battery_info(uint8_t* buffer)
     .battery_id                = 0,   // uint8_t
     .model_instance_id         = 0,   // uint32_t
   };
-  pkt.model_name.len = strlen(BATTERY_MODEL_NAME);
-  strncpy((char*)pkt.model_name.data, BATTERY_MODEL_NAME, sizeof(pkt.model_name.data));
-  uint32_t len = uavcan_equipment_power_BatteryInfo_encode(&pkt, buffer, true);
-  return len;
+  pkt.model_name.len = strlen(AERDNCAN_BATTERY_MODEL_NAME);
+  strncpy((char*)pkt.model_name.data, AERDNCAN_BATTERY_MODEL_NAME,
+          sizeof(pkt.model_name.data));
+  return uavcan_equipment_power_BatteryInfo_encode(&pkt, buffer, true);
 }
 
 /**
