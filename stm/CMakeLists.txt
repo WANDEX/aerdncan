@@ -5,32 +5,6 @@
 ##
 ## User is free to modify the file as much as necessary
 
-### Setup compiler settings
-#if(NOT DEFINED CMAKE_C_STANDARD)
-#  set(CMAKE_C_STANDARD 11)
-#  set(CMAKE_C_STANDARD_REQUIRED ON)
-#endif()
-#set(CMAKE_C_EXTENSIONS OFF)
-#
-#
-### Define the build type
-#if(NOT CMAKE_BUILD_TYPE)
-#  set(CMAKE_BUILD_TYPE "Debug")
-#endif()
-#
-### Set the project name
-#set(CMAKE_PROJECT_NAME aerdncan)
-#
-### Enable compile command to ease indexing with e.g. clangd
-#set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
-#
-### Core project settings
-#project(${CMAKE_PROJECT_NAME})
-#message("Build type: " ${CMAKE_BUILD_TYPE})
-#
-### Enable CMake support for ASM and C languages
-#enable_language(C ASM)
-
 set(CANARD_BASE    "${CMAKE_SOURCE_DIR}/3rdparty/dronecan/libcanard")
 set(DSDLC_GEN_BASE "${CMAKE_SOURCE_DIR}/dsdlc_generated")
 
@@ -84,7 +58,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
   ## Add user defined library search paths
 )
 
-# Add sources to executable
+## Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
   ## Add user sources here
 )
@@ -97,8 +71,6 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 ## Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
   ## Add user defined symbols
-  # _GNU_SOURCE # || _BSD_SOURCE is needed for the canard_stm32.c usleep()
-  # CANARD_ENABLE_CANFD
 )
 
 ## Remove wrong libob.a library dependency when using cpp files

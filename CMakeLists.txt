@@ -19,12 +19,6 @@ if(NOT DEFINED CMAKE_C_STANDARD)
 endif()
 set(CMAKE_C_EXTENSIONS OFF)
 
-# if(NOT DEFINED CMAKE_CXX_STANDARD)
-#   set(CMAKE_CXX_STANDARD 20)
-#   set(CMAKE_CXX_STANDARD_REQUIRED ON)
-# endif()
-# set(CMAKE_CXX_EXTENSIONS OFF)
-
 option(AERDNCAN_DISABLE_TOP_PROJECT OFF)
 if(PROJECT_IS_TOP_LEVEL AND NOT AERDNCAN_DISABLE_TOP_PROJECT)
   set(AERDNCAN_IS_TOP_PROJECT ON)
@@ -39,27 +33,7 @@ list(APPEND CMAKE_MODULE_PATH
 )
 
 macro(targets_and_linking)
-  # add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/...")
-
-  # include(wndx_sane_create_targets)
-  # ## library targets & compilation options/flags
-  # wndx_sane_create_targets(PFX wndx LIB aerdncan
-  #   # CXX_STD cxx_std_${CMAKE_CXX_STANDARD}
-  #   PHD "stm/Inc"
-  # )
-  #
-  # ## link sources with project dependencies from the core library target
-  # target_link_libraries(aerdncan_src INTERFACE wndx::aerdncan::core)
-  #
-  # ## link sources with project dev interface (for the compilation flags/options)
-  # target_link_libraries(aerdncan_src PRIVATE wndx::aerdncan::dev)
-  #
-  # ## link sources with project dependencies
-  # target_link_libraries(aerdncan_src PUBLIC wndx::aerdncan::deps)
-
   if(AERDNCAN_BUILD_SRC OR NOT AERDNCAN_IS_TOP_PROJECT)
-    ## find/fetch dependencies:
-    # find_package(fmt REQUIRED)
     add_subdirectory(stm)
   endif()
 endmacro(targets_and_linking)
