@@ -39,16 +39,48 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
+typedef struct {
+  float Rl;           // Resistor Load       (Ohms)
+  float Rs;           // Resistor Shunt      (Ohms)
+  float Vref;         // Reference Voltage   (Volts)
+  int16_t PIN_Is;     // Input  Current pin
+  int16_t PIN_Temp;   // Temperature pin
+  int16_t PIN_Vout;   // Output Voltage pin
+} ina169_c;           // constants
+
+typedef struct {
+  struct uavcan_equipment_power_BatteryInfo* const data;
+  volatile ina169_c const* c; // constants
+  uint8_t  buf[UAVCAN_EQUIPMENT_POWER_BATTERYINFO_MAX_SIZE];
+  uint32_t buf_len;
+} ina169_t; // self-contained ina169 data structure
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
 /**
+ * @brief total count of batteries UAV has.
+ *
+ * @see batteries[AERDNCAN_BATTERY_CNT]
+ */
+#ifndef AERDNCAN_BATTERY_CNT
+#define AERDNCAN_BATTERY_CNT 1
+#endif//AERDNCAN_BATTERY_CNT
+
+/**
+ * @note max battery id is uint8_t -> 256 || 0x100!
+ */
+#ifndef AERDNCAN_BATTERY_ID_BASE
+#define AERDNCAN_BATTERY_ID_BASE 0x10
+#endif//AERDNCAN_BATTERY_ID_BASE
+
+/**
  * @note max length is 31 chars!
  */
 #ifndef AERDNCAN_BATTERY_MODEL_NAME
-#define AERDNCAN_BATTERY_MODEL_NAME "Dummy Battery Name"
+#define AERDNCAN_BATTERY_MODEL_NAME "Dummy Smart Battery v1.1 LiPo"
 #endif//AERDNCAN_BATTERY_MODEL_NAME
 
 /**
@@ -58,6 +90,16 @@
 #ifndef AERDNCAN_CAN1_TARGET_BITRATE
 #define AERDNCAN_CAN1_TARGET_BITRATE 875000
 #endif//AERDNCAN_CAN1_TARGET_BITRATE
+
+/**
+ * To get via ADC the raw digital step value [0..4095] 12-bit ADC.
+ */
+#ifndef AERDNCAN_ADC_MAX_VAL
+#define AERDNCAN_ADC_MAX_VAL 4095 // ADC_RESOLUTION_12B
+// #define AERDNCAN_ADC_MAX_VAL 1023 // ADC_RESOLUTION_10B
+// #define AERDNCAN_ADC_MAX_VAL  255 // ADC_RESOLUTION_8B
+// #define AERDNCAN_ADC_MAX_VAL   63 // ADC_RESOLUTION_6B
+#endif//AERDNCAN_ADC_MAX_VAL
 
 /* USER CODE END PD */
 
@@ -69,6 +111,24 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+
+/**
+ * @brief constants (that may be different) between different batteries etc.
+ *
+ * @note consider NOT removing static + const, but making another/new instance.
+ *
+ * FIXME: .Rs is wrong? May currently be calculated improperly!
+ *   provided parts of the scheme are hard to understand as one complete whole!
+ */
+static volatile ina169_c const G_ina169_c = {
+  .Rl         = 27.4f * 1000, // *=1000 -> 27.4 (kOhms)
+  .Rs         = 15.0f / 1000, // /=1000 -> 15.0 (mOhms)
+  // .Rs         = 10.015f    //      -> 10.015 (kOhms) || FIXME: or ???
+  .Vref       = 3.3f, // (Volts)
+  .PIN_Is     = INA169_BAT_CURRENT_Pin,
+  .PIN_Temp   = INA169_BAT_TEMP_Pin,
+  .PIN_Vout   = INA169_BAT_VOLTAGE_Pin,
+};
 
 /* USER CODE END PV */
 
@@ -136,32 +196,105 @@ int16_t canard_init(void)
 }
 
 /**
+ * @note avoid re-assigning previously initialized unique fields, such as:
+ *   .battery_id, .model_instance_id, .model_name, etc.
+ *
+ * @retval      0               Success
+ */
+static uint16_t canard_fill_battery_info_pre(ina169_t *battery)
+{
+  for (uint8_t i = 0; i < AERDNCAN_BATTERY_CNT; ++i) {
+    // memset(battery[i].data, 0, sizeof(*battery[i].data));
+    /// fill battery identification
+    battery[i].data->battery_id        = AERDNCAN_BATTERY_ID_BASE + i;
+    battery[i].data->model_instance_id = AERDNCAN_BATTERY_ID_BASE;
+    battery[i].data->model_name.len = strlen(AERDNCAN_BATTERY_MODEL_NAME);
+    /// copy battery model name
+    strncpy((char*)battery[i].data->model_name.data, AERDNCAN_BATTERY_MODEL_NAME,
+            sizeof(battery[i].data->model_name.data));
+    battery[i].c = &G_ina169_c; // constants
+#if 1 // dbg info
+    fprintf(stderr,
+        "battery[%d] = {\n"
+        "  .battery_id = %d,\n"
+        "  .model_instance_id = %lu,\n"
+        "  .model_name.data[%d] = \"%s\",\n"
+        "}\n",
+        i,
+        battery[i].data->battery_id,
+        battery[i].data->model_instance_id,
+        battery[i].data->model_name.len, battery[i].data->model_name.data
+    );
+#endif
+  }
+  return 0;
+}
+
+/**
+ * @brief Taking ina169 pin data, fill: temperature, voltage, current.
+ *
+ * ina169 datasheet orig formulas:
+ *   Vout =  Is * Rs * Rl * gm -- (orig formula)
+ *
+ * Application Information & Operation (formulas):
+ *   Is -- load current || Vs -- Voltage supply || Rs -- Resistor shunt
+ *   Vs = Vin = Vin+ - Vin- = Is * Rs -- input Voltage
+ *   gm   = Io / Vin = 1000_mA / Vin -- transconductance
+ *   Io   = gm * Vin -- output current
+ *   Vout = Io * Rl  -- output Voltage
+ *
+ *   RG1 = RG2 = 1000_Ohms -- ina169 internal Resistors before Rs shunt
+ *   Is = (Vout * RG1) / (Rs * Rl)
+ *
+ * @retval      0     Success
+ */
+static int16_t canard_ina169_data(ina169_t *battery)
+{
+  /// easy to store & pass data about individual battery unit as args etc.
+  battery->data->current      = 0.f, // Is   (Amps)
+  battery->data->temperature  = 0.f, //      (Celsius)
+  battery->data->voltage      = 0.f, // Vout (Volts)
+  /// @note pre-configured in stm/Src/adc.c MX_ADC1_Init && HAL_ADC_MspInit
+  HAL_ADC_Start(&hadc1); // start the ADC conversion
+  if (HAL_ADC_PollForConversion(&hadc1, 10 /* ms timeout */) == HAL_OK) {
+    uint32_t rds = HAL_ADC_GetValue(&hadc1); // raw digital steps for conversion
+    battery->data->voltage =
+      ((float)rds * battery->c->Vref) / AERDNCAN_ADC_MAX_VAL;
+  }
+  HAL_ADC_Stop(&hadc1); // stop the ADC conversion to save power
+  // TODO: consider 8.2.3 Offsetting the Output Voltage if needed.
+  battery->data->current =
+    (battery->data->voltage * 1000) / (battery->c->Rs * battery->c->Rl);
+  // TODO: how to get/calculate battery temperature?
+  //   * Use temperature sensor VBAT_SENS (What its model, P/N?)
+  //   * Calculate/report approximate/critical working conditions based on:
+  //     * 6.4 Thermal Information & 6.5 Electrical Characteristics.
+  return 0;
+}
+
+/**
  * @brief Pushes one frame into the TX buffer, if there is space.
  *
- * @retval battery data length.
+ * @retval      0                       Error
+ * @retval      battery data length     Success
  */
-static uint32_t canard_fill_battery_info(uint8_t* buffer)
+static uint32_t canard_fill_battery_info(ina169_t *battery)
 {
-  // TODO fill with: temperature, voltage, current - from the ina169 pin data.
-  struct uavcan_equipment_power_BatteryInfo pkt = {
-    .temperature               = 0.f, // float
-    .voltage                   = 0.f, // float
-    .current                   = 0.f, // float
-    .average_power_10sec       = 0.f, // float
-    .remaining_capacity_wh     = 0.f, // float
-    .full_charge_capacity_wh   = 0.f, // float
-    .hours_to_full_charge      = 0.f, // float
-    .status_flags              = 0,   // uint16_t
-    .state_of_health_pct       = 0,   // uint8_t
-    .state_of_charge_pct       = 0,   // uint8_t
-    .state_of_charge_pct_stdev = 0,   // uint8_t
-    .battery_id                = 0,   // uint8_t
-    .model_instance_id         = 0,   // uint32_t
-  };
-  pkt.model_name.len = strlen(AERDNCAN_BATTERY_MODEL_NAME);
-  strncpy((char*)pkt.model_name.data, AERDNCAN_BATTERY_MODEL_NAME,
-          sizeof(pkt.model_name.data));
-  return uavcan_equipment_power_BatteryInfo_encode(&pkt, buffer, true);
+  if (!canard_ina169_data(battery)) {
+    return 0; // fail
+  }
+  battery->data->average_power_10sec       = 0.f; // float
+  battery->data->remaining_capacity_wh     = 0.f; // float
+  battery->data->full_charge_capacity_wh   = 0.f; // float
+  battery->data->hours_to_full_charge      = 0.f; // float
+  battery->data->status_flags              = 0;   // uint16_t
+  battery->data->state_of_health_pct       = 0;   // uint8_t
+  battery->data->state_of_charge_pct       = 0;   // uint8_t
+  battery->data->state_of_charge_pct_stdev = 0;   // uint8_t
+  return uavcan_equipment_power_BatteryInfo_encode(
+      battery->data,
+      battery->buf, true
+  );
 }
 
 /**
@@ -170,19 +303,18 @@ static uint32_t canard_fill_battery_info(uint8_t* buffer)
  * @retval      0               Success
  * @retval      negative        Error
  */
-int16_t canard_send_battery_info(void)
+int16_t canard_send_battery_info(ina169_t *battery)
 {
   static char const* const fn  = "canard_send_battery_info()";
   static char const* const fnt = "canardSTM32Transmit()";
   int16_t stat = -1; // error
   /// fill battery_data - CANARD_ENABLE_CANFD required to fit in single frame!
-  uint8_t  battery_data[UAVCAN_EQUIPMENT_POWER_BATTERYINFO_MAX_SIZE];
-  uint32_t battery_data_len = canard_fill_battery_info(battery_data);
+  battery->buf_len = canard_fill_battery_info(battery);
   CanardCANFrame* const frame = { };
   frame->id = 0;
-  frame->data_len = battery_data_len;
+  frame->data_len = battery->buf_len;
   frame->iface_id = 0;
-  memcpy(frame->data, battery_data, battery_data_len);
+  memcpy(frame->data, battery->buf, battery->buf_len);
   /// CAN send battery info, making sure that it fits in into a single frame!
   stat = canardSTM32Transmit(frame);
   if (stat < 0) { // error
@@ -236,6 +368,12 @@ int main(void)
   stat = canard_init();
   if (!stat) goto init_fail;
   fprintf(stderr, "[ OK ] init done\n");
+
+  ina169_t battery[AERDNCAN_BATTERY_CNT];
+  stat = canard_fill_battery_info_pre(battery);
+  if (!stat) goto init_fail;
+  fprintf(stderr, "[ OK ] batteries info pre-fill done\n");
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -244,7 +382,9 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    canard_send_battery_info();
+    for (uint8_t i = 0; i < AERDNCAN_BATTERY_CNT; ++i) {
+      canard_send_battery_info(&battery[i]);
+    }
     HAL_Delay(1000); // wait 1000ms = 1sec
   }
   return 0;
