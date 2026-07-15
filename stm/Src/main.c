@@ -112,6 +112,8 @@ typedef struct {
 
 /* USER CODE BEGIN PV */
 
+volatile uint8_t G_Main_Loop_Update_Event = 0;
+
 /**
  * @brief constants (that may be different) between different batteries etc.
  *
@@ -227,6 +229,22 @@ static uint16_t canard_fill_battery_info_pre(ina169_t *battery)
     );
 #endif
   }
+  return 0;
+}
+
+/**
+ * @see RM0090 - 13.10 Temperature sensor
+ * @see RM0090 - 13.11 Battery charge monitoring
+ *   Main features
+ *     Supported temperature range: –40 to 125 C
+ *     Precision: +-1.5 C
+ *
+ * VSENSE is input
+ *
+ * @retval      0               Success
+ */
+static uint16_t canard_ADC_temp(ina169_t *battery)
+{
   return 0;
 }
 
@@ -382,10 +400,12 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    for (uint8_t i = 0; i < AERDNCAN_BATTERY_CNT; ++i) {
-      canard_send_battery_info(&battery[i]);
+    if (G_Main_Loop_Update_Event) {
+      for (uint8_t i = 0; i < AERDNCAN_BATTERY_CNT; ++i) {
+        canard_send_battery_info(&battery[i]);
+      }
+      G_Main_Loop_Update_Event = 0;
     }
-    HAL_Delay(1000); // wait 1000ms = 1sec
   }
   return 0;
 init_fail:
@@ -441,6 +461,25 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+
+/**
+ * @brief update event within specific time gap without additional delay.
+ *
+ * How to configure CLK etc.
+ *   @see https://deepbluembedded.com/stm32-internal-temperature-sensor-reading-example/
+ *
+ * Instead of using sleep which adds additional delay time between executions.
+ *   HAL_Delay(1000); // wait 1000ms = 1sec
+ *
+ * stm32 Timer Calculator
+ *   @see https://deepbluembedded.com/stm32-timer-calculator/
+ */
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
+    HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0); // Toggle Interrupt Rate Indicator Pin
+    G_Main_Loop_Update_Event = 1;
+}
 
 /* USER CODE END 4 */
 
