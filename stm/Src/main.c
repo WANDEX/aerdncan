@@ -45,6 +45,8 @@ typedef struct {
   float Rl;           // Resistor Load       (Ohms)
   float Rs;           // Resistor Shunt      (Ohms)
   float Vref;         // Reference Voltage   (Volts)
+  float V25;          // Voltage at 25°C     (Volts)
+  float Avg_Slope;    // Average slope       (V/°C)
   int16_t PIN_Is;     // Input  Current pin
   int16_t PIN_Temp;   // Temperature pin
   int16_t PIN_Vout;   // Output Voltage pin
@@ -128,7 +130,9 @@ static volatile ina169_c const G_ina169_c = {
   .Rl         = 27.4f * 1000, // *=1000 -> 27.4 (kOhms)
   .Rs         = 15.0f / 1000, // /=1000 -> 15.0 (mOhms)
   // .Rs         = 10.015f    //      -> 10.015 (kOhms) || FIXME: or ???
-  .Vref       = 3.3f, // (Volts)
+  .Vref       = 3.3f,  // (Volts)
+  .V25        = 0.76f, // Voltage at 25°C (Volts)
+  .Avg_Slope  = 2.5f / 1000,  // /=1000 ->  2.5 (mV/°C) Average slope (V/°C)
   .PIN_Is     = INA169_BAT_CURRENT_Pin,
   .PIN_Temp   = INA169_BAT_TEMP_Pin,
   .PIN_Vout   = INA169_BAT_VOLTAGE_Pin,
@@ -240,13 +244,29 @@ static uint16_t canard_fill_battery_info_pre(ina169_t *battery)
  *   Main features
  *     Supported temperature range: –40 to 125 C
  *     Precision: +-1.5 C
+ * @see DS9484 - 6.3.22 Temperature sensor characteristics
  *
  * VSENSE is input
+ *
+ * For stm32f4, the formula is typically:
+ * Temperature (°C) = ((VSENSE - V25) / Avg_Slope) + 25
+ *
+ * VSENSE is the voltage read from the temperature sensor (via ADC)
+ * V25 is the voltage at 25°C (from datasheet)
+ * Avg_Slope is the average slope (from datasheet)
+ *
+ * TODO: consider calculate/report approximate/critical working conditions:
+ *   6.4 Thermal Information & 6.5 Electrical Characteristics.
  *
  * @retval      0               Success
  */
 static uint16_t canard_ADC_temp(ina169_t *battery)
 {
+  if (HAL_ADC_PollForConversion(&hadc1, 10 /* ms timeout */) == HAL_OK) {
+    uint32_t rds = HAL_ADC_GetValue(&hadc1); // raw digital steps for conversion
+    battery->data->temperature =
+      (((float)rds - battery->c->V25) / battery->c->Avg_Slope) + 25;
+  }
   return 0;
 }
 
@@ -270,25 +290,30 @@ static uint16_t canard_ADC_temp(ina169_t *battery)
  */
 static int16_t canard_ina169_data(ina169_t *battery)
 {
+  static char const* const fn  = "canard_ina169_data()";
+  static char const* const fnt = "canard_ADC_temp()";
+  int16_t stat = -1; // error
   /// easy to store & pass data about individual battery unit as args etc.
-  battery->data->current      = 0.f, // Is   (Amps)
-  battery->data->temperature  = 0.f, //      (Celsius)
-  battery->data->voltage      = 0.f, // Vout (Volts)
+  battery->data->current      = 0.f; // Is   (Amps)
+  battery->data->temperature  = 0.f; //      (Celsius)
+  battery->data->voltage      = 0.f; // Vout (Volts)
   /// @note pre-configured in stm/Src/adc.c MX_ADC1_Init && HAL_ADC_MspInit
   HAL_ADC_Start(&hadc1); // start the ADC conversion
   if (HAL_ADC_PollForConversion(&hadc1, 10 /* ms timeout */) == HAL_OK) {
     uint32_t rds = HAL_ADC_GetValue(&hadc1); // raw digital steps for conversion
     battery->data->voltage =
-      ((float)rds * battery->c->Vref) / AERDNCAN_ADC_MAX_VAL;
+      (float)rds * battery->c->Vref / AERDNCAN_ADC_MAX_VAL;
   }
-  HAL_ADC_Stop(&hadc1); // stop the ADC conversion to save power
   // TODO: consider 8.2.3 Offsetting the Output Voltage if needed.
   battery->data->current =
     (battery->data->voltage * 1000) / (battery->c->Rs * battery->c->Rl);
-  // TODO: how to get/calculate battery temperature?
-  //   * Use temperature sensor VBAT_SENS (What its model, P/N?)
-  //   * Calculate/report approximate/critical working conditions based on:
-  //     * 6.4 Thermal Information & 6.5 Electrical Characteristics.
+  /// get/calculate battery temperature
+  stat = canard_ADC_temp(battery);
+  HAL_ADC_Stop(&hadc1); // stop the ADC conversion to save power
+  if (stat != 0) {
+    fprintf(stderr, "%s ERROR: %s -> %d\n", fn, fnt, stat);
+    return stat;
+  }
   return 0;
 }
 
@@ -386,6 +411,11 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
+  // int32_t adc_buf[3];
+  /// start Timer3 (Trigger Source For ADC1)
+  // HAL_TIM_Base_Start(&htim3);
+  // HAL_ADCEx_Calibration_Start(&hadc1);
+  // HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buf, 2); // start ADC Conversion
   int16_t stat = -1; // error
   stat = canard_init();
   if (!stat) goto init_fail;
@@ -404,17 +434,25 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+#if 0
     if (G_Main_Loop_Update_Event) {
       for (uint8_t i = 0; i < AERDNCAN_BATTERY_CNT; ++i) {
         canard_send_battery_info(&battery[i]);
       }
       G_Main_Loop_Update_Event = 0;
     }
+#else
+    for (uint8_t i = 0; i < AERDNCAN_BATTERY_CNT; ++i) {
+      canard_send_battery_info(&battery[i]);
+      HAL_Delay(1000); // wait 1000ms = 1sec
+    }
+#endif
   }
   return 0;
 init_fail:
   fprintf(stderr, "[FAIL] init fail -> %d\n", stat);
   /// additional cleanup if needed.
+  HAL_ADC_Stop_DMA(&hadc1);
   return stat;
   /* USER CODE END 3 */
 }
@@ -466,7 +504,6 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 
-
 /**
  * @brief update event within specific time gap without additional delay.
  *
@@ -481,7 +518,8 @@ void SystemClock_Config(void)
  */
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-    HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0); // Toggle Interrupt Rate Indicator Pin
+    /// toggle Interrupt Rate Indicator Pin
+    HAL_GPIO_TogglePin(GPIOA, SAMPLING_RATE_VERS_Pin);
     G_Main_Loop_Update_Event = 1;
 }
 
