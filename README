@@ -36,5 +36,6 @@ $ cmake --build build
 
 TEST RUN DRONECAN
 =================
-$ ./3rdparty/dronecan/libcanard/examples/setup_socketcan.sh
+$ ./scripts/setup_socketcan.sh
+$ ./.venv/bin/dronecan_gui_tool
 
