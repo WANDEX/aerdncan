@@ -262,11 +262,16 @@ static uint16_t canard_fill_battery_info_pre(ina169_t *battery)
  */
 static uint16_t canard_ADC_temp(ina169_t *battery)
 {
+  ADC_ChannelConfTypeDef sConfig = {0};
+  /// get/calculate battery temperature - 16 stm32f4 temperature sensor
+  sConfig.Channel = ADC_CHANNEL_16; HAL_ADC_ConfigChannel(&hadc1, &sConfig);
+  HAL_ADC_Start(&hadc1); // start the ADC conversion
   if (HAL_ADC_PollForConversion(&hadc1, 10 /* ms timeout */) == HAL_OK) {
     uint32_t rds = HAL_ADC_GetValue(&hadc1); // raw digital steps for conversion
     battery->data->temperature =
       (((float)rds - battery->c->V25) / battery->c->Avg_Slope) + 25;
   }
+  HAL_ADC_Stop(&hadc1); // stop the ADC conversion to save power
   return 0;
 }
 
@@ -286,6 +291,8 @@ static uint16_t canard_ADC_temp(ina169_t *battery)
  *   RG1 = RG2 = 1000_Ohms -- ina169 internal Resistors before Rs shunt
  *   Is = (Vout * RG1) / (Rs * Rl)
  *
+ * poll & ADC start & stop are horrible combination, TODO: use DMA without poll.
+ *
  * @retval      0     Success
  */
 static int16_t canard_ina169_data(ina169_t *battery)
@@ -293,23 +300,25 @@ static int16_t canard_ina169_data(ina169_t *battery)
   static char const* const fn  = "canard_ina169_data()";
   static char const* const fnt = "canard_ADC_temp()";
   int16_t stat = -1; // error
+  /// tell the ADC which internal channel to connect to the converter.
+  ADC_ChannelConfTypeDef sConfig = {0};
   /// easy to store & pass data about individual battery unit as args etc.
   battery->data->current      = 0.f; // Is   (Amps)
   battery->data->temperature  = 0.f; //      (Celsius)
   battery->data->voltage      = 0.f; // Vout (Volts)
   /// @note pre-configured in stm/Src/adc.c MX_ADC1_Init && HAL_ADC_MspInit
-  HAL_ADC_Start(&hadc1); // start the ADC conversion
+  sConfig.Channel = ADC_CHANNEL_1; HAL_ADC_ConfigChannel(&hadc1, &sConfig);
+  HAL_ADC_Start(&hadc1);
   if (HAL_ADC_PollForConversion(&hadc1, 10 /* ms timeout */) == HAL_OK) {
     uint32_t rds = HAL_ADC_GetValue(&hadc1); // raw digital steps for conversion
     battery->data->voltage =
       (float)rds * battery->c->Vref / AERDNCAN_ADC_MAX_VAL;
   }
+  HAL_ADC_Stop(&hadc1);
   // TODO: consider 8.2.3 Offsetting the Output Voltage if needed.
   battery->data->current =
     (battery->data->voltage * 1000) / (battery->c->Rs * battery->c->Rl);
-  /// get/calculate battery temperature
   stat = canard_ADC_temp(battery);
-  HAL_ADC_Stop(&hadc1); // stop the ADC conversion to save power
   if (stat != 0) {
     fprintf(stderr, "%s ERROR: %s -> %d\n", fn, fnt, stat);
     return stat;
@@ -411,11 +420,15 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
+  // TODO: use DMA & interrupts based G_Main_Loop_Update_Event
+  //   instead of poll & HAL_Delay() which gives less accurate results.
+
   // int32_t adc_buf[3];
   /// start Timer3 (Trigger Source For ADC1)
   // HAL_TIM_Base_Start(&htim3);
   // HAL_ADCEx_Calibration_Start(&hadc1);
-  // HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buf, 2); // start ADC Conversion
+  // HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buf, 3); // start ADC conversion
+
   int16_t stat = -1; // error
   stat = canard_init();
   if (!stat) goto init_fail;
@@ -434,7 +447,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-#if 0
+#if 0 // use DMA & interrupts
     if (G_Main_Loop_Update_Event) {
       for (uint8_t i = 0; i < AERDNCAN_BATTERY_CNT; ++i) {
         canard_send_battery_info(&battery[i]);
